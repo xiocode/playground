@@ -15,7 +15,7 @@ ENV['VAGRANT_DEFAULT_PROVIDER'] = 'virtualbox'
 # Defaults for config options defined in CONFIG
 #
 
-$num_instances = 2
+$num_instances = 3
 $instance_name_prefix = "node"
 $share_home = false
 $vm_gui = false
@@ -33,21 +33,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
         config.cache.scope = :box
     end
 
-
-	config.vm.define vm_name = "master" do |config|
-		config.vm.hostname = vm_name
-
-		# just split out the ip
-		#
-
-		ip = IPAddr.new($vm_ip)
-		$vm_ip = ip.succ.to_s
-		config.vm.network "private_network", ip: $vm_ip 
-	end
-
-
     (1..$num_instances).each do |i|
-    
         config.vm.define vm_name = "%s-%02d" % [$instance_name_prefix, i] do |config|
             config.vm.hostname = vm_name
 
@@ -56,7 +42,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
 
             ip = IPAddr.new($vm_ip)
             $vm_ip = ip.succ.to_s
-            config.vm.network "private_network", ip: $vm_ip 
+            config.vm.network "private_network", ip: $vm_ip
         end
     end
 
@@ -72,8 +58,10 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     #
 
     config.vm.provision "shell", privileged: true, inline: <<-SHELL
-        sudo yum -y install docker
-        sudo systemctl start docker
+        sudo yum -y install epel-release
+        curl -sSL https://get.docker.com/ | sh
+        sudo usermod -aG docker $USER
+        sudo systemctl restart docker
         sudo systemctl enable docker
     SHELL
 
@@ -85,7 +73,5 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
         sudo cat /etc/sudoers | sed "s|.*secure_path.*|&:/usr/local/bin|" > /tmp/sudoers.sed
         mv /tmp/sudoers.sed /etc/sudoers
     SHELL
-
-    # for the purposes of our example we create a dockerfile to install apache
 
 end
