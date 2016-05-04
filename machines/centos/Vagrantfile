@@ -1,77 +1,76 @@
-# Basic CentOS and Docker setup Vagrantfile
-#
-# Weave Getting Started Guides
-#
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
 
-require 'fileutils'
-require 'ipaddr'
-
-Vagrant.require_version ">= 1.6.0"
-
+# Vagrantfile API/syntax version. Don't touch unless you know what you're doing!
 VAGRANTFILE_API_VERSION = "2"
 
-ENV['VAGRANT_DEFAULT_PROVIDER'] = 'virtualbox'
+# Require a recent version of vagrant otherwise some have reported errors setting host names on boxes
+Vagrant.require_version ">= 1.7.4"
 
-# Defaults for config options defined in CONFIG
-#
+# The number of minions to provision
+$num_minion = 3
 
-$num_instances = 3
-$instance_name_prefix = "node"
-$share_home = false
-$vm_gui = false
-$vm_memory = 1024
+# ip configuration
+$minion_ip_base = "10.246.2."
+$minion_ips = $num_minion.times.collect { |n| $minion_ip_base + "#{n+2}" }
+$minion_ips_str = $minion_ips.join(",")
+
+
+# OS platform to box information
+$boxes = {
+  "centos" => {
+    "name" => "centos/7",
+  }
+}
+$box_os="centos"
+
+# This stuff is cargo-culted from http://www.stefanwrobel.com/how-to-make-vagrant-performance-not-suck
+# Give access to half of all cpu cores on the host. We divide by 2 as we assume
+# that users are running with hyperthreads.
 $vm_cpus = 1
-$vm_starting_ip = "172.17.8.100"
 
-$vm_ip = $vm_starting_ip
+# Give VM 512MB of RAM
+$vm_mem = 1024
 
 Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
-    config.vm.box = "centos/7"
-    config.ssh.insert_key = true
-
-    if Vagrant.has_plugin?("vagrant-cachier")
-        config.cache.scope = :box
-    end
-
-    (1..$num_instances).each do |i|
-        config.vm.define vm_name = "%s-%02d" % [$instance_name_prefix, i] do |config|
-            config.vm.hostname = vm_name
-
-            # just split out the ip
-            #
-
-            ip = IPAddr.new($vm_ip)
-            $vm_ip = ip.succ.to_s
-            config.vm.network "private_network", ip: $vm_ip
-        end
-    end
-
-    config.vm.provider :virtualbox do |vb|
-        vb.gui = $vm_gui
-        vb.memory = $vm_memory
-        vb.cpus = $vm_cpus
-    end
-
-    # install docker packages
-    #
-    # https://docs.docker.com/installation/ubuntulinux/
-    #
-
+  def customize_vm(config)
+    config.vm.box = $boxes[$box_os]["name"]
     config.vm.provision "shell", privileged: true, inline: <<-SHELL
-        sudo yum -y install epel-release
+        sudo yum -yq install epel-release
+        sudo yum update -yq
         curl -sSL https://get.docker.com/ | sh
         sudo usermod -aG docker $USER
         sudo systemctl restart docker
         sudo systemctl enable docker
+        sudo yum install python-pip
+        sudo pip install -U docker-compose
+        curl -L https://github.com/docker/machine/releases/download/v0.7.0/docker-machine-`uname -s`-`uname -m` > ~/docker-machine
+        sudo mv ~/docker-machine /usr/local/bin/docker-machine
+        sudo chmod +x /usr/local/bin/docker-machine
     SHELL
 
-    # CentOS Sudoers file does not have /usr/local/bin in its path
-    # by defualt
-    #
+    config.vm.provider :virtualbox do |v|
+      v.customize ["modifyvm", :id, "--memory", $vm_mem]
+      v.customize ["modifyvm", :id, "--cpus", $vm_cpus]
 
-    config.vm.provision "shell", privileged:true, inline: <<-SHELL
-        sudo cat /etc/sudoers | sed "s|.*secure_path.*|&:/usr/local/bin|" > /tmp/sudoers.sed
-        mv /tmp/sudoers.sed /etc/sudoers
-    SHELL
+      # Use faster paravirtualized networking
+      v.customize ["modifyvm", :id, "--nictype1", "virtio"]
+      v.customize ["modifyvm", :id, "--nictype2", "virtio"]
+    end
+  end
+
+
+  # minion
+  $num_minion.times do |n|
+    minion_vm_name = "minion-#{n+1}"
+    config.vm.define minion_vm_name do |minion|
+      customize_vm minion
+
+      minion_index = n+1
+      minion_ip = $minion_ips[n]
+      minion.vm.network "private_network", ip: "#{minion_ip}"
+      minion.vm.hostname = "minion-#{minion_index}"
+    end
+  end
 
 end
